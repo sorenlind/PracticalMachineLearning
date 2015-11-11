@@ -1,0 +1,7 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Søren Lind Kristiansen"
+date: "11 November 2015"
+output: html_document
+---
+

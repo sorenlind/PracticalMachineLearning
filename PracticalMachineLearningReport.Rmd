@@ -1,7 +1,350 @@
 ---
 title: "Practical Machine Learning Course Project"
 author: "Søren Lind Kristiansen"
-date: "11 November 2015"
+date: "20 November 2015"
 output: html_document
 ---
 
+```{r courseProjectSetup, echo=FALSE, message=FALSE}
+set.seed(151111)
+library(knitr)
+library(caret)
+library(pander)
+library(xtable)
+library(doMC)
+library(htmlTable)
+
+registerDoMC(cores = 8)
+
+baseUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/"
+trainingFile <- "pml-training.csv"
+testingFile <- "pml-testing.csv"
+dataPath <- "./data"
+
+# Reads and processed data containing only the relevant dates. Data will be downloaded and processed if
+# necessary.
+readData <- function(fileName) {
+  # Download relevant data if necessary.
+  localFilePath <- file.path(dataPath, fileName)
+  fileUrl <- paste(baseUrl, fileName, sep = "")
+  
+  if (!file.exists(localFilePath)) {
+    downloadData(fileUrl, localFilePath)
+  }
+  
+  read.csv(localFilePath)
+}
+
+readTrainingFile <- function() {
+  readData(trainingFile)
+}
+
+readTestingFile <- function() {
+  readData(testingFile)
+}
+
+downloadData <- function(fileUrl, localFilePath) {
+  if (!dir.exists(dataPath)) {
+    dir.create(dataPath)
+  }
+  
+  # Download the file
+  message(fileUrl)
+  download.file(fileUrl, localFilePath, "curl")
+}
+
+# Returns a logical vector indicating which columns contain NA in
+# at least one of the two specified data sets.
+buildNAColumns <- function(rawTrain, rawTest) {
+  trainNA <- colSums(is.na(rawTrain)) != 0
+  testNA <- colSums(is.na(rawTest)) != 0
+  trainNA | testNA
+}
+
+# Load the data - data will be downloaded if necessary
+rawTrainingData <- readTrainingFile()
+gradingSet <- readTestingFile()
+
+trainingSetP <- 0.50
+testingSetP <- 0.80
+```
+
+## Executive Summary ##
+We use data from the [Human Activity Recognition project][har] to build several supervised models for classification of physical activity. We then use these models to build an ensemble which achieves better accuracy than any of the individual models. Finally we use the ensemble to correctly predict 20 data points used for grading.
+
+[har]: http://groupware.les.inf.puc-rio.br/har Human Activity Recognition
+
+## The Data ##
+
+The data set consists of two files, [pml-training.csv][training] and [pml-testing.csv][testing]. The main goal of this project is to use the former to build a classifier for predicting activity class in the latter. To avoid increasing risk of overfitting, we decided on a strategy for dividing the data into subsets for training and for evaluation before exploring the data.
+
+[training]: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+[testing]: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+A division of the data was already made by the fact that we were given two files, `pml-training.csv` and `pml-testing.csv`. Since we fit and evaluate multiple models, we have, however, divided the data from `pml-training.csv` into subsets. We created one subset on which we perform the training of each individual model. We call this the *training set*. We also created a data set used to evaluate our different models. We will call this the *testing set*. We also use this to train the ensemble. Finally, we created a data set which we completely set aside until we have our final model, the ensemble. This will be called the *validation set*. To avoid confusion, we will refer to the data in `pml-testing.csv` as the *grading* set as it will be used for grading the project.
+
+A quick look at `pml-training.csv` reveals `r dim(rawTrainingData)[1]` rows and `r dim(rawTrainingData)[2]` columns. The testing set will be used for training the ensemble in addition to evaluating the individual classifiers and as a result we need a large testing set. We dedicded on `r 100*trainingSetP`% of `pml-training.csv` for the training set, `r 100*trainingSetP*testingSetP`% for the testing set and `r 100*(1 - (trainingSetP + (1 - trainingSetP)*testingSetP))`% for the validation set. We set aside both the testing set, the validation set and the grading set. 
+
+```{r createSets, echo=FALSE, cache=TRUE}
+# Create the training set consiting.
+trainingSetIndices <-  createDataPartition(rawTrainingData$classe, p = trainingSetP, list=FALSE)
+trainingSet <- rawTrainingData[trainingSetIndices,]
+
+# Create a subset containing of the remaining data. Split it in two parts one
+# for testing and one for validation.
+remainingSet <- rawTrainingData[-trainingSetIndices,]
+testingIndices <- createDataPartition(remainingSet$classe, p=testingSetP, list=FALSE)
+testingSet <- remainingSet[testingIndices,]
+validationSet <- remainingSet[-testingIndices,]
+```
+
+### Feature Selection ###
+The data was collected as time series data. That is, data for performing a single activity consists of several observations. When building a classifier on data like this, it is necessary to consider whether it should classify a *series* of observations or classify *individual* observations. The classifier built for the original paper ([Qualitative Activity Recognition of Weight Lifting Exercises][QARofWLE]) takes a series of observations as input. The project instructions do not specify which strategy to choose but looking at the structure of `pml-testing.csv` reveals the answer: The file contains only individual observations and so we built our classifier to take individual observations as input. A subset of selected columns and rows from the training set is shown below.
+
+[QARofWLE]: http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201
+
+```{r dataPreview, cache=TRUE, echo=FALSE}
+kable(trainingSet[c(25:27,165:167),c(1,6:11,160)], align = 'c')
+```
+
+The training data contains `r dim(rawTrainingData)[2]` columns. Since one column (`classe`) contains the outcome variable, this leaves 159 possible features. A good part of these could be thrown away. The variable `X` is just the row number so we removed that. Since we did not treat the data as time-based, we dropped all timestamp variables as well as the `num_window` since this is basically a simple timestamp. The `new_window` variable indicates whether a new recording window was started. This doesn't appear to be related to the activity and was therefore removed as well. The `user_name` variable contains the name of the subject performing the activity. Ideally, if we imagine writing production software, we would want to start predicting (correctly) as soon as a new user starts exercising, without first having to train the system for that specific user. However, as mentioned in the original paper, each individual is so different that this is most likely not feasible. Therefore we have kept the `user_name` in the data.
+
+```{r manualColumnDrop, cache=TRUE, echo=FALSE}
+# Create a logical vector specifying the variables we have manually decided to
+# remove.
+columnNamesToDrop <- c('X',
+                       'raw_timestamp_part_1',
+                       'raw_timestamp_part_2',
+                       'cvtd_timestamp',
+                       'new_window',
+                       'num_window')
+columnsToDropManually <- names(trainingSet) %in% columnNamesToDrop
+```
+
+We removed several other variables. Manually inspecting the data reveals several variables which primarily contain either `NA` or `NULL`. This does not necessarily mean they are not good predictors in the instances where they actually contain data, and so it does not mean we should blindly remove them. But it may hint that, depending on the test data, they will not add much value. When examining `pml-testing.csv` several variables contained *only* `NA`. Note that this examination of `pml-testing.csv` does not mean we used test data either directly or indirectly for training our classifier. First, we only look at the structure (which variables does it actually contains data for) and secondly, the file does not contain the activity (the `classe` variable) which we are to predict, so we cannot, even subconciously, use it for evaluating the performance of our classifier. We removed all variables which had at least one instance of either `NA` or `NULL` in either data file.
+
+```{r naColumnDrop, cache=TRUE, echo=FALSE}
+naColumns <- buildNAColumns(trainingSet, gradingSet)
+```
+
+```{r corColumnDrop, cache=TRUE, echo=FALSE}
+# Find columns that are highly correlated with another column. Factor variables
+# cannot be included when computing correlation. At this point we have only two
+# factor variables ('user_name' and 'classe') so theres are excluded when
+# computing the correlation.
+columnsToSearch <- !(columnsToDropManually | naColumns)
+columnsToSearch['user_name'] <- FALSE
+columnsToSearch['classe'] <- FALSE
+correlationColumns <- findCorrelation(cor(trainingSet[,columnsToSearch]), names = TRUE)
+columnsToRemoveByCorrelation <- names(trainingSet) %in% correlationColumns
+```
+
+```{r removeColumns, cache=TRUE, echo=FALSE}
+columnsToRemove <- columnsToDropManually | naColumns | columnsToRemoveByCorrelation
+trainingSet <- trainingSet[, !columnsToRemove]
+testingSet <- testingSet[, !columnsToRemove]
+validationSet <- validationSet[, !columnsToRemove]
+gradingSet <- gradingSet[, !columnsToRemove]
+```
+
+Next, we looked at the correlation of the variables in the training data. For pairs of highly correlated variables, it makes sense to remove one of the variables as it will not have much predictive power in addition to the other variable. The `caret` package has the `findCorrelation` function which was used to find variables to remove in this way. After removing the variables found by calling `findCorrelation`, we were left with `r dim(trainingSet)[2] - 1` features.
+
+## Model Training ##
+We tried fitting four models: a random forest, a (polynomial) support vector machine, an averaged neural network and finally an extreme learning machine.
+
+### Random Forest ###
+Our first model is a random forest (`parRF`). We didn't specify any tuning parameters. This means caret will itself specify three different values for the `mtry` parameter, train several models with each parameter and then pick the parameter which on average resulted in the best model.
+
+```{r buildRandomForest, echo=TRUE, cache=TRUE, message=FALSE}
+parRFFit <- train(classe ~ .,
+                  method = "parRF",
+                  data = trainingSet,
+                  trControl = trainControl(method = "cv", number = 5, repeats = 2))
+```
+
+Having completed the training, we can now look at the results shown below.
+
+```{r randomForestResults, echo=TRUE, cache=TRUE, message=FALSE}
+pander(parRFFit$results)
+```
+
+What we see in above table is average accuracy measures for the models trained with different values of `mtry`. The highest accuracy is achieved by running with an `mtry` value of `r parRFFit$finalModel$tuneValue[[1]]`. We should note that these scores are in some sense in-sample measures. When we ran the `train` function with 5-fold cross validation as specified above, caret created five models for each tried value of `mtry`. Each of the models for a given value of `mtry` was trained on four fifths of the training data and tested on one fifth. The accuracy reported for a given value of `mtry` is the average of the five models trained with that value. Thus each accuracy score is calculated using an average of out-of-sample scores, but when caret then used these accuracy scores to pick the best value of `mtry` it used knowledge of the results on each k-fold hold-out and thereby we cannot report the accuracy of the best value of `mtry` as the out-of-sample accuracy. Further, after caret found the best value of `mtry` for us, it trained a new model on the entire training set, and this is the final model. Testing this model on any part of the training set would be testing in-sample (because the model was trained on the entire training set). We present out-of-sample measures in the Results section.
+
+### Support Vector Machine ###
+Next up is support vector machines (`svmPoly`) as shown below. Again we ran with 5-fold cross validation and two repeats.
+
+```{r buildSvmPoly, echo=TRUE, cache=TRUE, message=FALSE}
+svmPolyFit <- train(classe ~ .,
+                 method = "svmPoly",
+                 data = trainingSet,
+                 trControl = trainControl(method = "cv", number = 5, repeats = 2))
+```
+
+### Model Averaged Neural Network ###
+For the averaged neural network, we used `avNNet`. For this type of classifier, centering and scaling the data increases the accuracy (with a fixed number of training iterations), so we added both transformations to the preprocessing step. We also specified increased values for network size, max number of weights and max number of training interations.
+
+```{r buildAvnNet, echo=TRUE, cache=TRUE, message=FALSE}
+avNNetFit <- train(classe ~ .,
+                   method = "avNNet",
+                   data = trainingSet,
+                   trControl = trainControl(method = "cv", number = 5, repeats = 2),
+                   tuneGrid = data.frame(size = c(30,40,45), decay = 0.2, bag = FALSE),
+                   MaxNWts=3500,
+                   maxit = 400,
+                   preProcess = c("center", "scale"))
+```
+
+### Extreme Learning Machine ###
+The last individual classifier was an extreme learning machine (`elm`). We tried different values for `nhid` and let caret pick the best of those value.
+
+```{r builElm, echo=TRUE, cache=TRUE, message=FALSE}
+elmFit <- train(classe ~ .,
+                   method = "elm",
+                   data = trainingSet,
+                   trControl = trainControl(method = "cv", number = 5, repeats = 2),
+                   tuneGrid = data.frame(nhid = c(50, 100, 250, 500), actfun = "sig"),
+                   preProcess = c("center", "scale"))
+```
+
+### Ensemble ###
+Finally, we created the ensemble. Our strategy was to build another classifier that takes the output of the first classifiers as features, The ensemble classifer may be able to learn a pattern that the individual learners don't see. For the ensemble we again chose a random forest. When training the ensemble classifier, we use the predictions from the individual classifiers as features. Each classifier most likely performs better on the training set comparted to the testing set and in some may even have training set accuracy of 100%. When training the ensemble classifier we want to avoid this, because what we are looking for is patterns in the classification *errors* of the individual classifiers. Therefore, the classifications used as features for the ensemble classifier must come from classification of previously unseen data. For this we used the testing set. 
+
+```{r buildEnsembleStackingValidation, echo=FALSE, cache=FALSE, message=FALSE}
+# Creates a data sat which can be used for stacking. This is done by predicting
+# the outcome variable on the specified data set using each of the specified
+# classifiers. Each row in the resulting data frame consists of the prediction
+# from each classifier as well as the outcome variable ('classe').
+stackingData <- function(classifiers, dataSet) {
+  voteMatrix <- sapply(classifiers, FUN = predict, newdata = dataSet)
+  stackingSetMatrix <- cbind(voteMatrix, as.character(dataSet$classe) )
+  stackingSet <- data.frame(stackingSetMatrix, stringsAsFactors = TRUE)
+  names(stackingSet) <- c(sapply(classifiers, function(x) { x$method }), "classe")
+  stackingSet
+}
+
+# Create the data sets used for stacking.
+ensembleModels <- list(parRFFit, svmPolyFit, avNNetFit, elmFit)
+stackingTestingSet <- stackingData(ensembleModels, testingSet)
+stackingValidationSet <- stackingData(ensembleModels, validationSet)
+
+# Train a nwe classifier on the predictions of each of the existing classifiers.
+stackingFitTrainedOnTesting <- train(classe ~ .,
+                                     method = "parRF",
+                                     data = stackingTestingSet,
+                                     trControl = trainControl(method = "cv",
+                                                              number = 5,
+                                                              repeats = 2))
+```
+
+## Results##
+We evaluated each individual classifier on both the testing set, the validation set and the grading set as shown below. We did not evaluate the ensemble on the testing set since this would result in in-sample measures. We did evaluate the ensemble on both the validation set and the grading set.
+
+```{r accuraciesTable, echo=FALSE, cache=FALSE, message=FALSE}
+# Calculates accuracy for specified list of classifiers and an ensemble trained
+# on those classifiers.
+buildAccuraciesWithEnsemble <- function(classifiers, ensemble, dataSet) {
+  accuracies <- c(sapply(classifiers, accuracyForClassifier, dataSet),
+                  accuracyForClassifier(ensemble,
+                                        stackingData(classifiers, dataSet)))
+  
+  errors <- sapply(accuracies, function(x) { 1 - x} )
+  
+  m <- cbind(accuracies, errors)
+  rownames(m) <- c(sapply(classifiers, function(x) { x$method }), "Ensemble")
+  colnames(m) <- c("Accuracy", "Error")
+  m
+}
+
+# Calculates accuracy for specified list of classifiers.
+buildAccuracies <- function(classifiers, dataSet) {
+  accuracies <- sapply(classifiers, accuracyForClassifier, dataSet)
+  
+  errors <- sapply(accuracies, function(x) { 1 - x} )
+  
+  m <- cbind(accuracies, errors)
+  rownames(m) <- sapply(classifiers, function(x) { x$method })
+  colnames(m) <- c("Accuracy", "Error")
+  m
+}
+
+# Calculates accuracy for specified classifier on specified data set.
+accuracyForClassifier <- function(classifier, dataSet) {
+  predictions <- predict(classifier, newdata = dataSet)
+  cmatrix <- confusionMatrix(predictions, dataSet$classe) 
+  cmatrix$overall[1]
+}
+```
+
+### Testing Set ###
+The below table contains the accuracies and errors for each individual classifier on the testing set. Since the testing set was 'unseen data' for each classifier, the reported values are *out-of-sample* measures. The random forest fares best (but not by much), while the extreme learning machine falls behind. It would likely have done better if we increased the tuning parameter `nhid` but this greatly increases training time.
+
+```{r resultsTesting, echo=FALSE, cache=FALSE, message=FALSE}
+# Create table of accuracies and errors on the validation set
+individualModels <- list(parRFFit, svmPolyFit, avNNetFit, elmFit)
+testingResults <- buildAccuracies(individualModels, testingSet)
+kable(testingResults)
+```
+
+### Validation Set ###
+Results from running each classifier as well as the ensemble on the validation data set are shown below. Note that the ensemble does better than any of the individual classifiers. Since neither the individual classifiers nor the ensemble had previously 'seen' the validation set, the reported values are out-of-sample.
+
+```{r resultsValidation, echo=FALSE, cache=FALSE, message=FALSE}
+# Create table of accuracies and errors on the validation set
+validationResults <- buildAccuraciesWithEnsemble(individualModels, stackingFitTrainedOnTesting, validationSet)
+kable(validationResults)
+```
+
+```{r stackingCMatrixValidation, echo=FALSE, cache=FALSE, message=FALSE}
+stackingValidationPredictions <- predict(stackingFitTrainedOnTesting,
+                                         newdata = stackingValidationSet)
+stackingValidationCMatrix <- confusionMatrix(stackingValidationPredictions,
+                                             stackingValidationSet$classe)
+htmlTable(stackingValidationCMatrix$table,
+          rgroup = c("Prediction"),
+          n.rgroup = c(5),
+          cgroup = c("Reference"),
+          n.cgroup = c(5),
+          caption="Confusion matrix for the ensemble predicting the validation set")
+```
+
+
+### Grading Set ###
+Finally we show results for predicting on the grading set. The correct values of the outcome variable for the grading set were found by letting the ensemble classify each observation. The predictions were then uploaded to Coursera and the correctness was confirmed.
+
+```{r testGradingSetStacking, echo=FALSE, cache=FALSE, message=FALSE}
+# Create a new grading set which contains the correct answers. The correct answers have been found by predicting
+# using the ensemble and they have then been validated by uploading to Coursera.
+correctAnswers <- c("B", "A", "B", "A", "A", "E", "D", "B", "A", "A", "B", "C", "B", "A", "E", "E", "A", "B", "B", "B")
+gradingSetWithCorrectAnswers <- gradingSet
+gradingSetWithCorrectAnswers$classe <- correctAnswers
+stackingGradingSet <- stackingData(ensembleModels, gradingSetWithCorrectAnswers)
+stackingGradingPredictions <- predict(stackingFitTrainedOnTesting, newdata = stackingGradingSet)
+stackingGradingCMatrix <- confusionMatrix(stackingGradingPredictions, stackingGradingSet$classe)
+```
+
+```{r resultsGrading, echo=FALSE, cache=FALSE, message=FALSE}
+# Create table of accuracies and errors on the validation set
+# 
+gradingResults <- buildAccuraciesWithEnsemble(individualModels, stackingFitTrainedOnTesting, gradingSetWithCorrectAnswers)
+kable(gradingResults)
+```
+
+As above table shows, using the random forest classifier or the neural network alone would have been enough to achieve a score of 20/20.
+
+## Conclusion ##
+We have trained four individual classifiers for predicting phsyical activity from the Human Activity Recognition project. We then trained an ensemble using the predictions from the individual classifiers as features. Using the ensemble we were able to achieve a 20/20 score on the grading set.
+
+```{r writeStackingGradingPredictions, echo=FALSE, cache=FALSE, message=FALSE}
+# Writes predictions for grading set to disk for easy upload to Coursera.
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("submission/problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+# Code disabled. Enable to automatically write submission files.
+# cPredictions <- as.character(stackingGradingPredictions)
+# pml_write_files(cPredictions)
+```

@@ -10,7 +10,7 @@
 
 <meta name="author" content="Søren Lind Kristiansen" />
 
-<meta name="date" content="2015-11-11" />
+<meta name="date" content="2015-11-20" />
 
 <title>Practical Machine Learning Course Project</title>
 
@@ -64,11 +64,466 @@ img {
 <div id="header">
 <h1 class="title">Practical Machine Learning Course Project</h1>
 <h4 class="author"><em>Søren Lind Kristiansen</em></h4>
-<h4 class="date"><em>11 November 2015</em></h4>
+<h4 class="date"><em>20 November 2015</em></h4>
 </div>
 
 
-
+<div id="executive-summary" class="section level2">
+<h2>Executive Summary</h2>
+<p>We use data from the <a href="http://groupware.les.inf.puc-rio.br/har%20Human%20Activity%20Recognition">Human Activity Recognition project</a> to build several supervised models for classification of physical activity. We then use these models to build an ensemble which achieves better accuracy than any of the individual models. Finally we use the ensemble to correctly predict 20 data points used for grading.</p>
+</div>
+<div id="the-data" class="section level2">
+<h2>The Data</h2>
+<p>The data set consists of two files, <a href="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv">pml-training.csv</a> and <a href="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv">pml-testing.csv</a>. The main goal of this project is to use the former to build a classifier for predicting activity class in the latter. To avoid increasing risk of overfitting, we decided on a strategy for dividing the data into subsets for training and for evaluation before exploring the data.</p>
+<p>A division of the data was already made by the fact that we were given two files, <code>pml-training.csv</code> and <code>pml-testing.csv</code>. Since we fit and evaluate multiple models, we have, however, divided the data from <code>pml-training.csv</code> into subsets. We created one subset on which we perform the training of each individual model. We call this the <em>training set</em>. We also created a data set used to evaluate our different models. We will call this the <em>testing set</em>. We also use this to train the ensemble. Finally, we created a data set which we completely set aside until we have our final model, the ensemble. This will be called the <em>validation set</em>. To avoid confusion, we will refer to the data in <code>pml-testing.csv</code> as the <em>grading</em> set as it will be used for grading the project.</p>
+<p>A quick look at <code>pml-training.csv</code> reveals 19622 rows and 160 columns. The testing set will be used for training the ensemble in addition to evaluating the individual classifiers and as a result we need a large testing set. We dedicded on 50% of <code>pml-training.csv</code> for the training set, 40% for the testing set and 10% for the validation set. We set aside both the testing set, the validation set and the grading set.</p>
+<div id="feature-selection" class="section level3">
+<h3>Feature Selection</h3>
+<p>The data was collected as time series data. That is, data for performing a single activity consists of several observations. When building a classifier on data like this, it is necessary to consider whether it should classify a <em>series</em> of observations or classify <em>individual</em> observations. The classifier built for the original paper (<a href="http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201">Qualitative Activity Recognition of Weight Lifting Exercises</a>) takes a series of observations as input. The project instructions do not specify which strategy to choose but looking at the structure of <code>pml-testing.csv</code> reveals the answer: The file contains only individual observations and so we built our classifier to take individual observations as input. A subset of selected columns and rows from the training set is shown below.</p>
+<table>
+<thead>
+<tr class="header">
+<th align="left"></th>
+<th align="center">X</th>
+<th align="center">new_window</th>
+<th align="center">num_window</th>
+<th align="center">roll_belt</th>
+<th align="center">pitch_belt</th>
+<th align="center">yaw_belt</th>
+<th align="center">total_accel_belt</th>
+<th align="center">classe</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">44</td>
+<td align="center">44</td>
+<td align="center">no</td>
+<td align="center">13</td>
+<td align="center">1.30</td>
+<td align="center">8.00</td>
+<td align="center">-94.20</td>
+<td align="center">3</td>
+<td align="center">A</td>
+</tr>
+<tr class="even">
+<td align="left">45</td>
+<td align="center">45</td>
+<td align="center">no</td>
+<td align="center">13</td>
+<td align="center">1.30</td>
+<td align="center">7.85</td>
+<td align="center">-94.20</td>
+<td align="center">3</td>
+<td align="center">A</td>
+</tr>
+<tr class="odd">
+<td align="left">49</td>
+<td align="center">49</td>
+<td align="center">no</td>
+<td align="center">13</td>
+<td align="center">1.31</td>
+<td align="center">7.69</td>
+<td align="center">-94.20</td>
+<td align="center">3</td>
+<td align="center">A</td>
+</tr>
+<tr class="even">
+<td align="left">321</td>
+<td align="center">321</td>
+<td align="center">no</td>
+<td align="center">52</td>
+<td align="center">125.00</td>
+<td align="center">26.70</td>
+<td align="center">-1.26</td>
+<td align="center">20</td>
+<td align="center">A</td>
+</tr>
+<tr class="odd">
+<td align="left">324</td>
+<td align="center">324</td>
+<td align="center">no</td>
+<td align="center">52</td>
+<td align="center">125.00</td>
+<td align="center">26.70</td>
+<td align="center">-0.77</td>
+<td align="center">20</td>
+<td align="center">A</td>
+</tr>
+<tr class="even">
+<td align="left">328</td>
+<td align="center">328</td>
+<td align="center">no</td>
+<td align="center">52</td>
+<td align="center">125.00</td>
+<td align="center">26.70</td>
+<td align="center">-0.98</td>
+<td align="center">20</td>
+<td align="center">A</td>
+</tr>
+</tbody>
+</table>
+<p>The training data contains 160 columns. Since one column (<code>classe</code>) contains the outcome variable, this leaves 159 possible features. A good part of these could be thrown away. The variable <code>X</code> is just the row number so we removed that. Since we did not treat the data as time-based, we dropped all timestamp variables as well as the <code>num_window</code> since this is basically a simple timestamp. The <code>new_window</code> variable indicates whether a new recording window was started. This doesn’t appear to be related to the activity and was therefore removed as well. The <code>user_name</code> variable contains the name of the subject performing the activity. Ideally, if we imagine writing production software, we would want to start predicting (correctly) as soon as a new user starts exercising, without first having to train the system for that specific user. However, as mentioned in the original paper, each individual is so different that this is most likely not feasible. Therefore we have kept the <code>user_name</code> in the data.</p>
+<p>We removed several other variables. Manually inspecting the data reveals several variables which primarily contain either <code>NA</code> or <code>NULL</code>. This does not necessarily mean they are not good predictors in the instances where they actually contain data, and so it does not mean we should blindly remove them. But it may hint that, depending on the test data, they will not add much value. When examining <code>pml-testing.csv</code> several variables contained <em>only</em> <code>NA</code>. Note that this examination of <code>pml-testing.csv</code> does not mean we used test data either directly or indirectly for training our classifier. First, we only look at the structure (which variables does it actually contains data for) and secondly, the file does not contain the activity (the <code>classe</code> variable) which we are to predict, so we cannot, even subconciously, use it for evaluating the performance of our classifier. We removed all variables which had at least one instance of either <code>NA</code> or <code>NULL</code> in either data file.</p>
+<p>Next, we looked at the correlation of the variables in the training data. For pairs of highly correlated variables, it makes sense to remove one of the variables as it will not have much predictive power in addition to the other variable. The <code>caret</code> package has the <code>findCorrelation</code> function which was used to find variables to remove in this way. After removing the variables found by calling <code>findCorrelation</code>, we were left with 48 features.</p>
+</div>
+</div>
+<div id="model-training" class="section level2">
+<h2>Model Training</h2>
+<p>We tried fitting four models: a random forest, a (polynomial) support vector machine, an averaged neural network and finally an extreme learning machine.</p>
+<div id="random-forest" class="section level3">
+<h3>Random Forest</h3>
+<p>Our first model is a random forest (<code>parRF</code>). We didn’t specify any tuning parameters. This means caret will itself specify three different values for the <code>mtry</code> parameter, train several models with each parameter and then pick the parameter which on average resulted in the best model.</p>
+<pre class="r"><code>parRFFit &lt;- train(classe ~ .,
+                  method = &quot;parRF&quot;,
+                  data = trainingSet,
+                  trControl = trainControl(method = &quot;cv&quot;, number = 5, repeats = 2))</code></pre>
+<p>Having completed the training, we can now look at the results shown below.</p>
+<pre class="r"><code>pander(parRFFit$results)</code></pre>
+<table>
+<colgroup>
+<col width="9%"></col>
+<col width="15%"></col>
+<col width="11%"></col>
+<col width="18%"></col>
+<col width="12%"></col>
+</colgroup>
+<thead>
+<tr class="header">
+<th align="center">mtry</th>
+<th align="center">Accuracy</th>
+<th align="center">Kappa</th>
+<th align="center">AccuracySD</th>
+<th align="center">KappaSD</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="center">2</td>
+<td align="center">0.9852</td>
+<td align="center">0.9813</td>
+<td align="center">0.001908</td>
+<td align="center">0.002416</td>
+</tr>
+<tr class="even">
+<td align="center">27</td>
+<td align="center">0.9877</td>
+<td align="center">0.9844</td>
+<td align="center">0.003024</td>
+<td align="center">0.003827</td>
+</tr>
+<tr class="odd">
+<td align="center">52</td>
+<td align="center">0.9797</td>
+<td align="center">0.9743</td>
+<td align="center">0.00521</td>
+<td align="center">0.00659</td>
+</tr>
+</tbody>
+</table>
+<p>What we see in above table is average accuracy measures for the models trained with different values of <code>mtry</code>. The highest accuracy is achieved by running with an <code>mtry</code> value of 27. We should note that these scores are in some sense in-sample measures. When we ran the <code>train</code> function with 5-fold cross validation as specified above, caret created five models for each tried value of <code>mtry</code>. Each of the models for a given value of <code>mtry</code> was trained on four fifths of the training data and tested on one fifth. The accuracy reported for a given value of <code>mtry</code> is the average of the five models trained with that value. Thus each accuracy score is calculated using an average of out-of-sample scores, but when caret then used these accuracy scores to pick the best value of <code>mtry</code> it used knowledge of the results on each k-fold hold-out and thereby we cannot report the accuracy of the best value of <code>mtry</code> as the out-of-sample accuracy. Further, after caret found the best value of <code>mtry</code> for us, it trained a new model on the entire training set, and this is the final model. Testing this model on any part of the training set would be testing in-sample (because the model was trained on the entire training set). We present out-of-sample measures in the Results section.</p>
+</div>
+<div id="support-vector-machine" class="section level3">
+<h3>Support Vector Machine</h3>
+<p>Next up is support vector machines (<code>svmPoly</code>) as shown below. Again we ran with 5-fold cross validation and two repeats.</p>
+<pre class="r"><code>svmPolyFit &lt;- train(classe ~ .,
+                 method = &quot;svmPoly&quot;,
+                 data = trainingSet,
+                 trControl = trainControl(method = &quot;cv&quot;, number = 5, repeats = 2))</code></pre>
+</div>
+<div id="model-averaged-neural-network" class="section level3">
+<h3>Model Averaged Neural Network</h3>
+<p>For the averaged neural network, we used <code>avNNet</code>. For this type of classifier, centering and scaling the data increases the accuracy (with a fixed number of training iterations), so we added both transformations to the preprocessing step. We also specified increased values for network size, max number of weights and max number of training interations.</p>
+<pre class="r"><code>avNNetFit &lt;- train(classe ~ .,
+                   method = &quot;avNNet&quot;,
+                   data = trainingSet,
+                   trControl = trainControl(method = &quot;cv&quot;, number = 5, repeats = 2),
+                   tuneGrid = data.frame(size = c(30,40,45), decay = 0.2, bag = FALSE),
+                   MaxNWts=3500,
+                   maxit = 400,
+                   preProcess = c(&quot;center&quot;, &quot;scale&quot;))</code></pre>
+</div>
+<div id="extreme-learning-machine" class="section level3">
+<h3>Extreme Learning Machine</h3>
+<p>The last individual classifier was an extreme learning machine (<code>elm</code>). We tried different values for <code>nhid</code> and let caret pick the best of those value.</p>
+<pre class="r"><code>elmFit &lt;- train(classe ~ .,
+                   method = &quot;elm&quot;,
+                   data = trainingSet,
+                   trControl = trainControl(method = &quot;cv&quot;, number = 5, repeats = 2),
+                   tuneGrid = data.frame(nhid = c(50, 100, 250, 500), actfun = &quot;sig&quot;),
+                   preProcess = c(&quot;center&quot;, &quot;scale&quot;))</code></pre>
+</div>
+<div id="ensemble" class="section level3">
+<h3>Ensemble</h3>
+<p>Finally, we created the ensemble. Our strategy was to build another classifier that takes the output of the first classifiers as features, The ensemble classifer may be able to learn a pattern that the individual learners don’t see. For the ensemble we again chose a random forest. When training the ensemble classifier, we use the predictions from the individual classifiers as features. Each classifier most likely performs better on the training set comparted to the testing set and in some may even have training set accuracy of 100%. When training the ensemble classifier we want to avoid this, because what we are looking for is patterns in the classification <em>errors</em> of the individual classifiers. Therefore, the classifications used as features for the ensemble classifier must come from classification of previously unseen data. For this we used the testing set.</p>
+</div>
+</div>
+<div id="results" class="section level2">
+<h2>Results</h2>
+<p>We evaluated each individual classifier on both the testing set, the validation set and the grading set as shown below. We did not evaluate the ensemble on the testing set since this would result in in-sample measures. We did evaluate the ensemble on both the validation set and the grading set.</p>
+<div id="testing-set" class="section level3">
+<h3>Testing Set</h3>
+<p>The below table contains the accuracies and errors for each individual classifier on the testing set. Since the testing set was ‘unseen data’ for each classifier, the reported values are <em>out-of-sample</em> measures. The random forest fares best (but not by much), while the extreme learning machine falls behind. It would likely have done better if we increased the tuning parameter <code>nhid</code> but this greatly increases training time.</p>
+<table>
+<thead>
+<tr class="header">
+<th align="left"></th>
+<th align="right">Accuracy</th>
+<th align="right">Error</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">parRF</td>
+<td align="right">0.9901911</td>
+<td align="right">0.0098089</td>
+</tr>
+<tr class="even">
+<td align="left">svmPoly</td>
+<td align="right">0.9886624</td>
+<td align="right">0.0113376</td>
+</tr>
+<tr class="odd">
+<td align="left">avNNet</td>
+<td align="right">0.9839490</td>
+<td align="right">0.0160510</td>
+</tr>
+<tr class="even">
+<td align="left">elm</td>
+<td align="right">0.8666242</td>
+<td align="right">0.1333758</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div id="validation-set" class="section level3">
+<h3>Validation Set</h3>
+<p>Results from running each classifier as well as the ensemble on the validation data set are shown below. Note that the ensemble does better than any of the individual classifiers. Since neither the individual classifiers nor the ensemble had previously ‘seen’ the validation set, the reported values are out-of-sample.</p>
+<table>
+<thead>
+<tr class="header">
+<th align="left"></th>
+<th align="right">Accuracy</th>
+<th align="right">Error</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">parRF</td>
+<td align="right">0.9877551</td>
+<td align="right">0.0122449</td>
+</tr>
+<tr class="even">
+<td align="left">svmPoly</td>
+<td align="right">0.9892857</td>
+<td align="right">0.0107143</td>
+</tr>
+<tr class="odd">
+<td align="left">avNNet</td>
+<td align="right">0.9826531</td>
+<td align="right">0.0173469</td>
+</tr>
+<tr class="even">
+<td align="left">elm</td>
+<td align="right">0.8632653</td>
+<td align="right">0.1367347</td>
+</tr>
+<tr class="odd">
+<td align="left">Ensemble</td>
+<td align="right">0.9933673</td>
+<td align="right">0.0066327</td>
+</tr>
+</tbody>
+</table>
+<table class="gmisc_table" style="border-collapse: collapse;">
+<thead>
+<tr>
+<td colspan="6" style="text-align: left;">
+Confusion matrix for the ensemble predicting the validation set
+</td>
+</tr>
+<tr>
+<th style="border-top: 2px solid grey;">
+</th>
+<th colspan="5" style="font-weight: 900; border-bottom: 1px solid grey; border-top: 2px solid grey; text-align: center;">
+Reference
+</th>
+</tr>
+<tr>
+<th style="border-bottom: 1px solid grey;">
+</th>
+<th style="border-bottom: 1px solid grey; text-align: center;">
+A
+</th>
+<th style="border-bottom: 1px solid grey; text-align: center;">
+B
+</th>
+<th style="border-bottom: 1px solid grey; text-align: center;">
+C
+</th>
+<th style="border-bottom: 1px solid grey; text-align: center;">
+D
+</th>
+<th style="border-bottom: 1px solid grey; text-align: center;">
+E
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td colspan="6" style="font-weight: 900;">
+Prediction
+</td>
+</tr>
+<tr>
+<td style="text-align: left;">
+  A
+</td>
+<td style="text-align: center;">
+558
+</td>
+<td style="text-align: center;">
+6
+</td>
+<td style="text-align: center;">
+0
+</td>
+<td style="text-align: center;">
+0
+</td>
+<td style="text-align: center;">
+0
+</td>
+</tr>
+<tr>
+<td style="text-align: left;">
+  B
+</td>
+<td style="text-align: center;">
+0
+</td>
+<td style="text-align: center;">
+373
+</td>
+<td style="text-align: center;">
+3
+</td>
+<td style="text-align: center;">
+0
+</td>
+<td style="text-align: center;">
+0
+</td>
+</tr>
+<tr>
+<td style="text-align: left;">
+  C
+</td>
+<td style="text-align: center;">
+0
+</td>
+<td style="text-align: center;">
+0
+</td>
+<td style="text-align: center;">
+339
+</td>
+<td style="text-align: center;">
+3
+</td>
+<td style="text-align: center;">
+0
+</td>
+</tr>
+<tr>
+<td style="text-align: left;">
+  D
+</td>
+<td style="text-align: center;">
+0
+</td>
+<td style="text-align: center;">
+0
+</td>
+<td style="text-align: center;">
+0
+</td>
+<td style="text-align: center;">
+317
+</td>
+<td style="text-align: center;">
+0
+</td>
+</tr>
+<tr>
+<td style="border-bottom: 2px solid grey; text-align: left;">
+  E
+</td>
+<td style="border-bottom: 2px solid grey; text-align: center;">
+0
+</td>
+<td style="border-bottom: 2px solid grey; text-align: center;">
+0
+</td>
+<td style="border-bottom: 2px solid grey; text-align: center;">
+0
+</td>
+<td style="border-bottom: 2px solid grey; text-align: center;">
+1
+</td>
+<td style="border-bottom: 2px solid grey; text-align: center;">
+360
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div id="grading-set" class="section level3">
+<h3>Grading Set</h3>
+<p>Finally we show results for predicting on the grading set. The correct values of the outcome variable for the grading set were found by letting the ensemble classify each observation. The predictions were then uploaded to Coursera and the correctness was confirmed.</p>
+<table>
+<thead>
+<tr class="header">
+<th align="left"></th>
+<th align="right">Accuracy</th>
+<th align="right">Error</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">parRF</td>
+<td align="right">1.00</td>
+<td align="right">0.00</td>
+</tr>
+<tr class="even">
+<td align="left">svmPoly</td>
+<td align="right">0.95</td>
+<td align="right">0.05</td>
+</tr>
+<tr class="odd">
+<td align="left">avNNet</td>
+<td align="right">1.00</td>
+<td align="right">0.00</td>
+</tr>
+<tr class="even">
+<td align="left">elm</td>
+<td align="right">0.70</td>
+<td align="right">0.30</td>
+</tr>
+<tr class="odd">
+<td align="left">Ensemble</td>
+<td align="right">1.00</td>
+<td align="right">0.00</td>
+</tr>
+</tbody>
+</table>
+<p>As above table shows, using the random forest classifier or the neural network alone would have been enough to achieve a score of 20/20.</p>
+</div>
+</div>
+<div id="conclusion" class="section level2">
+<h2>Conclusion</h2>
+<p>We have trained four individual classifiers for predicting phsyical activity from the Human Activity Recognition project. We then trained an ensemble using the predictions from the individual classifiers as features. Using the ensemble we were able to achieve a 20/20 score on the grading set.</p>
+</div>
 
 
 </div>

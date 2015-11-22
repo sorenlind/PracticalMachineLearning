@@ -257,6 +257,30 @@ img {
 <div id="ensemble" class="section level3">
 <h3>Ensemble</h3>
 <p>Finally, we created the ensemble. Our strategy was to build another classifier that takes the output of the first classifiers as features, The ensemble classifer may be able to learn a pattern that the individual learners don’t see. For the ensemble we again chose a random forest. When training the ensemble classifier, we use the predictions from the individual classifiers as features. Each classifier most likely performs better on the training set comparted to the testing set and in some may even have training set accuracy of 100%. When training the ensemble classifier we want to avoid this, because what we are looking for is patterns in the classification <em>errors</em> of the individual classifiers. Therefore, the classifications used as features for the ensemble classifier must come from classification of previously unseen data. For this we used the testing set.</p>
+<pre class="r"><code># Creates a data sat which can be used for stacking. This is done by predicting
+# the outcome variable on the specified data set using each of the specified
+# classifiers. Each row in the resulting data frame consists of the prediction
+# from each classifier as well as the outcome variable ('classe').
+stackingData &lt;- function(classifiers, dataSet) {
+  voteMatrix &lt;- sapply(classifiers, FUN = predict, newdata = dataSet)
+  stackingSetMatrix &lt;- cbind(voteMatrix, as.character(dataSet$classe) )
+  stackingSet &lt;- data.frame(stackingSetMatrix, stringsAsFactors = TRUE)
+  names(stackingSet) &lt;- c(sapply(classifiers, function(x) { x$method }), &quot;classe&quot;)
+  stackingSet
+}
+
+# Create the data sets used for stacking.
+ensembleModels &lt;- list(parRFFit, svmPolyFit, avNNetFit, elmFit)
+stackingTestingSet &lt;- stackingData(ensembleModels, testingSet)
+stackingValidationSet &lt;- stackingData(ensembleModels, validationSet)
+
+# Train a nwe classifier on the predictions of each of the existing classifiers.
+stackingFitTrainedOnTesting &lt;- train(classe ~ .,
+                                     method = &quot;parRF&quot;,
+                                     data = stackingTestingSet,
+                                     trControl = trainControl(method = &quot;cv&quot;,
+                                                              number = 5,
+                                                              repeats = 2))</code></pre>
 </div>
 </div>
 <div id="results" class="section level2">
@@ -276,8 +300,8 @@ img {
 <tbody>
 <tr class="odd">
 <td align="left">parRF</td>
-<td align="right">0.9901911</td>
-<td align="right">0.0098089</td>
+<td align="right">0.9900637</td>
+<td align="right">0.0099363</td>
 </tr>
 <tr class="even">
 <td align="left">svmPoly</td>

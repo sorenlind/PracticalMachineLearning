@@ -1,7 +1,7 @@
 ---
 title: "Practical Machine Learning Course Project"
 author: "Søren Lind Kristiansen"
-date: "20 November 2015"
+date: "22 November 2015"
 output: html_document
 ---
 
@@ -99,12 +99,20 @@ validationSet <- remainingSet[-testingIndices,]
 ```
 
 ### Feature Selection ###
-The data was collected as time series data. That is, data for performing a single activity consists of several observations. When building a classifier on data like this, it is necessary to consider whether it should classify a *series* of observations or classify *individual* observations. The classifier built for the original paper ([Qualitative Activity Recognition of Weight Lifting Exercises][QARofWLE]) takes a series of observations as input. The project instructions do not specify which strategy to choose but looking at the structure of `pml-testing.csv` reveals the answer: The file contains only individual observations and so we built our classifier to take individual observations as input. A subset of selected columns and rows from the training set is shown below.
+The data was collected as time series data. That is, data for performing a single activity consists of several observations. When building a classifier on data like this, it is necessary to consider whether it should classify a *series* of observations or classify *individual* observations. The classifier built for the original paper ([Qualitative Activity Recognition of Weight Lifting Exercises][QARofWLE]) takes a series of observations as input. The project instructions do not specify which strategy to choose but looking at the structure of `pml-testing.csv` reveals the answer: The file contains only individual observations and so we built our classifier to take individual observations as input. A subset of selected columns and rows from the training set is shown below and below that is a histogram of the `classe` variable.
 
 [QARofWLE]: http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201
 
 ```{r dataPreview, cache=TRUE, echo=FALSE}
 kable(trainingSet[c(25:27,165:167),c(1,6:11,160)], align = 'c')
+```
+
+```{r trainingSetHistogram, echo=FALSE}
+g <- ggplot(trainingSet, aes(x = classe, fill = classe))
+g <- g + geom_histogram(colour = "black")
+g <- g + ggtitle("Distribution of 'classe' variable in training set")
+g <- g + theme(plot.title = element_text(face="bold"))
+g
 ```
 
 The training data contains `r dim(rawTrainingData)[2]` columns. Since one column (`classe`) contains the outcome variable, this leaves 159 possible features. A good part of these could be thrown away. The variable `X` is just the row number so we removed that. Since we did not treat the data as time-based, we dropped all timestamp variables as well as the `num_window` since this is basically a simple timestamp. The `new_window` variable indicates whether a new recording window was started. This doesn't appear to be related to the activity and was therefore removed as well. The `user_name` variable contains the name of the subject performing the activity. Ideally, if we imagine writing production software, we would want to start predicting (correctly) as soon as a new user starts exercising, without first having to train the system for that specific user. However, as mentioned in the original paper, each individual is so different that this is most likely not feasible. Therefore we have kept the `user_name` in the data.
